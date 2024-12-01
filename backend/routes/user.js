@@ -3,6 +3,9 @@ import zod from 'zod';
 import User from '../modal/db.js';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
+import authMiddleware  from '../middleware.js'
+import Account from '../modal/account.js';
+
 
 dotenv.config();
 const router = express.Router();
@@ -40,6 +43,11 @@ router.post("/signup", async (req, res) => {
     const user = await User.create({ username, password, firstName, lastName });
     const userId = user._id;
 
+    await Account.create({
+        userId,
+        balance: 1 + Math.random()*10000
+    })
+
     const token = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
     res.status(201).json({
@@ -52,6 +60,9 @@ router.post("/signup", async (req, res) => {
       message: "Internal server error",
     });
   }
+
+
+  
 });
 
 
@@ -77,7 +88,7 @@ router.post("/signin",async(req,res) => {
     if (user) {
         const token = jwt.sign({
             userId: user._id
-        }, JWT_SECRET);
+        }, process.env.JWT_SECRET);
   
         res.json({
             token: token
@@ -92,6 +103,61 @@ router.post("/signin",async(req,res) => {
 })
 
 
+
+const updateBody = zod.object({
+    password: zod.string().optional(),
+    firstName: zod.string().optional(),
+    lastName: zod.string().optional(),
+});
+
+router.put("/", authMiddleware, async (req, res) => {
+    try {
+        const parseResult = updateBody.safeParse(req.body);
+        if (!parseResult.success) {
+            return res.status(400).json({
+                message: "Invalid input",
+                errors: parseResult.error.errors,
+            });
+        }
+
+        const updateData = parseResult.data;
+        if (updateData.password) {
+            updateData.password = await bcrypt.hash(updateData.password, 10);
+        }
+
+        await User.updateOne({ _id: req.userId }, updateData);
+        res.json({ message: "Updated successfully" });
+    } catch (error) {
+        console.error("Error in update route:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+
+router.get("/bulk", async (req, res) => {
+    const filter = req.query.filter || "";
+
+    const users = await User.find({
+        $or: [{
+            firstName: {
+                "$regex": filter
+            }
+        }, {
+            lastName: {
+                "$regex": filter
+            }
+        }]
+    })
+
+    res.json({
+        user: users.map(user => ({
+            username: user.username,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            _id: user._id
+        }))
+    })
+})
 
 
 
